@@ -200,37 +200,29 @@ if docs:
     active_names = ", ".join([d["filename"] for d in docs])
     st.success(f"📚 **Active Knowledge Base:** {active_names} ({total_chunks} indexed chunks ready)")
 
-    # Dynamic suggestion chips based on the uploaded document
+    # Dynamic generic suggestions for any document
     st.markdown("**💡 Quick Question Suggestions:**")
     col1, col2, col3, col4 = st.columns(4)
-    if any("rag" in d["filename"].lower() for d in docs):
-        with col1:
-            if st.button("🧠 Agentic RAG", use_container_width=True):
-                st.session_state.prompt_input = "What is Agentic RAG and how does it work?"
-        with col2:
-            if st.button("🕸️ Graph RAG", use_container_width=True):
-                st.session_state.prompt_input = "What are Graphs and Graph RAG?"
-        with col3:
-            if st.button("🔀 RAG Fusion", use_container_width=True):
-                st.session_state.prompt_input = "What is RAG Fusion?"
-        with col4:
-            if st.button("🎯 Context Precision", use_container_width=True):
-                st.session_state.prompt_input = "What is Context Precision and how is it evaluated?"
-    else:
-        with col1:
-            if st.button("📌 Summarize Topics", use_container_width=True):
-                st.session_state.prompt_input = "Summarize the primary topics covered in this document."
-        with col2:
-            if st.button("🔍 Key Concepts", use_container_width=True):
-                st.session_state.prompt_input = "What are the key concepts and definitions explained here?"
-        with col3:
-            if st.button("📊 Data & Metrics", use_container_width=True):
-                st.session_state.prompt_input = "What are the main numbers, metrics, or statistics provided?"
-        with col4:
-            if st.button("🚫 Out-of-Scope Test", use_container_width=True):
-                st.session_state.prompt_input = "What is the policy on employee dental surgery reimbursement?"
+    with col1:
+        if st.button("📌 Summarize Topics", use_container_width=True):
+            st.session_state.prompt_input = "Summarize the primary topics covered in this document."
+    with col2:
+        if st.button("🔍 Key Concepts", use_container_width=True):
+            st.session_state.prompt_input = "What are the main key concepts or definitions explained?"
+    with col3:
+        if st.button("📊 Key Data & Facts", use_container_width=True):
+            st.session_state.prompt_input = "What are the key statistics, facts, or numbers provided?"
+    with col4:
+        if st.button("🚫 Out-of-Scope Test", use_container_width=True):
+            st.session_state.prompt_input = "What is the policy on employee dental surgery reimbursement?"
 else:
-    st.info("👈 **No documents indexed yet.** Please upload your PDF in the left sidebar to start asking questions!")
+    st.info(
+        "👈 **No documents indexed yet.**\n\n"
+        "To get started:\n"
+        "1. Upload one or more PDF files using the left sidebar.\n"
+        "2. Click **'🚀 Process & Index PDF(s)'**.\n"
+        "3. Ask questions in natural language and receive grounded answers with exact page citations!"
+    )
 
 
 # Render Conversation Messages
@@ -260,58 +252,61 @@ if "prompt_input" in st.session_state and st.session_state.prompt_input:
     st.session_state.prompt_input = None
 
 if user_query:
-    st.session_state.chat_messages.append({"role": "user", "content": user_query, "sources": []})
-    with st.chat_message("user"):
-        st.markdown(user_query)
+    if not docs:
+        st.warning("⚠️ Please upload and index at least one PDF in the left sidebar first before asking questions.")
+    else:
+        st.session_state.chat_messages.append({"role": "user", "content": user_query, "sources": []})
+        with st.chat_message("user"):
+            st.markdown(user_query)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Rewriting query, searching FAISS index & running LangGraph flow..."):
-            session_id = st.session_state.current_session_id
-            history = memory.get_langchain_messages(session_id, limit=settings.MAX_HISTORY_TURNS)
+        with st.chat_message("assistant"):
+            with st.spinner("Searching document context & running LangGraph flow..."):
+                session_id = st.session_state.current_session_id
+                history = memory.get_langchain_messages(session_id, limit=settings.MAX_HISTORY_TURNS)
 
-            state_input = {
-                "question": user_query,
-                "session_id": session_id,
-                "chat_history": history,
-                "standalone_question": user_query,
-                "documents": [],
-                "sources": [],
-                "is_relevant": False,
-                "answer": "",
-                "doc_filter": active_filter
-            }
+                state_input = {
+                    "question": user_query,
+                    "session_id": session_id,
+                    "chat_history": history,
+                    "standalone_question": user_query,
+                    "documents": [],
+                    "sources": [],
+                    "is_relevant": False,
+                    "answer": "",
+                    "doc_filter": active_filter
+                }
 
-            final_state = graph.invoke(state_input)
+                final_state = graph.invoke(state_input)
 
-            # Record in SQLite memory
-            memory.add_message(session_id, "user", user_query)
-            memory.add_message(session_id, "assistant", final_state["answer"], sources=final_state["sources"])
+                # Record in SQLite memory
+                memory.add_message(session_id, "user", user_query)
+                memory.add_message(session_id, "assistant", final_state["answer"], sources=final_state["sources"])
 
-            # Render Query Reformulation Pill if rewritten
-            if final_state["standalone_question"].strip() != user_query.strip():
-                st.info(f"🔄 **Query Reformulation:** *\"{final_state['standalone_question']}\"*")
+                # Render Query Reformulation Pill if rewritten
+                if final_state["standalone_question"].strip() != user_query.strip():
+                    st.info(f"🔄 **Query Reformulation:** *\"{final_state['standalone_question']}\"*")
 
-            st.markdown(final_state["answer"])
+                st.markdown(final_state["answer"])
 
-            # Render Supporting Source Cards
-            if final_state["sources"]:
-                with st.expander(f"📚 {len(final_state['sources'])} Supporting Sources", expanded=True):
-                    for idx, src in enumerate(final_state["sources"]):
-                        st.markdown(f"""
-                        <div class="citation-card">
-                            <div>
-                                <span class="pill">Citation {idx+1}</span>
-                                <b>📄 {src['filename']}</b> (p. {src['page']})
-                                <span class="pill pill-score">Relevance: {src.get('score', 'N/A')}</span>
+                # Render Supporting Source Cards
+                if final_state["sources"]:
+                    with st.expander(f"📚 {len(final_state['sources'])} Supporting Sources", expanded=True):
+                        for idx, src in enumerate(final_state["sources"]):
+                            st.markdown(f"""
+                            <div class="citation-card">
+                                <div>
+                                    <span class="pill">Citation {idx+1}</span>
+                                    <b>📄 {src['filename']}</b> (p. {src['page']})
+                                    <span class="pill pill-score">Relevance: {src.get('score', 'N/A')}</span>
+                                </div>
+                                <p style="margin-top:6px; color:#475569; font-style: italic;">
+                                    "{src['snippet']}"
+                                </p>
                             </div>
-                            <p style="margin-top:6px; color:#475569; font-style: italic;">
-                                "{src['snippet']}"
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            """, unsafe_allow_html=True)
 
-    st.session_state.chat_messages.append({
-        "role": "assistant",
-        "content": final_state["answer"],
-        "sources": final_state["sources"]
-    })
+        st.session_state.chat_messages.append({
+            "role": "assistant",
+            "content": final_state["answer"],
+            "sources": final_state["sources"]
+        })

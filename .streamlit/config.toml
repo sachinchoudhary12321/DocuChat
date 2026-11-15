@@ -3,3 +3,8 @@ maxUploadSize = 300
 enableCORS = false
 enableXsrfProtection = false
 headless = true
+fileWatcherType = "none"
+
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"

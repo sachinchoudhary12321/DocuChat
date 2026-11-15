@@ -128,6 +128,14 @@ class ConversationMemory:
             conn.commit()
             return cursor.rowcount
 
+    def clear_all(self) -> int:
+        """Erase dialogue memory for all sessions."""
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM conversation_turns")
+            conn.commit()
+            return cursor.rowcount
+
     def list_sessions(self) -> List[Dict[str, Any]]:
         """List all active sessions with message counts and timestamps."""
         with self._get_conn() as conn:
