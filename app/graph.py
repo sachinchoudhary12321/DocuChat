@@ -60,18 +60,20 @@ class LocalDeterministicLLM(BaseChatModel):
                 prior_queries = human_msgs[:-1]
                 latest_query = human_msgs[-1]
 
+                stopwords = {"what", "when", "where", "which", "who", "whom", "this", "that", "these", "those", "how", "why", "the", "and", "or", "for", "with", "from", "about", "does", "did", "was", "were", "are", "tell", "explain", "give", "show"}
                 matched_entities = []
                 for pq in reversed(prior_queries):
-                    for word in ["TechCorp", "Cloud", "Revenue", "Division", "Performance", "SLA", "P1", "GDPR", "SAR", "Erasure", "Incident", "CapEx"]:
-                        if re.search(r"\b" + re.escape(word) + r"\b", pq, re.I) and word not in matched_entities:
-                            matched_entities.append(word)
+                    words = re.findall(r"\b[A-Za-z0-9_-]+\b", pq)
+                    for w in words:
+                        if len(w) > 3 and w.lower() not in stopwords and w not in matched_entities:
+                            matched_entities.append(w)
 
                 combined_subject = " ".join(matched_entities[:3]) if matched_entities else "the topic"
 
                 reformulated = latest_query
                 if re.search(r"\b(it|they|that|this|these|those|the previous year)\b", latest_query, re.I):
                     reformulated = re.sub(r"\b(it|they|that|this)\b", combined_subject, latest_query, flags=re.I)
-                    reformulated = re.sub(r"\bthe previous year\b", "Q3 2023 previous year", reformulated, flags=re.I)
+                    reformulated = re.sub(r"\bthe previous year\b", f"{combined_subject} previous year", reformulated, flags=re.I)
                 elif combined_subject and not any(e.lower() in latest_query.lower() for e in matched_entities):
                     reformulated = f"{combined_subject}: {latest_query}"
                 return ChatResult(generations=[ChatGeneration(message=AIMessage(content=reformulated))])
@@ -149,7 +151,7 @@ class LocalDeterministicLLM(BaseChatModel):
                             if bigram in sent_lower:
                                 bonus += 3
 
-                        if any(term in sent_lower for term in ["$", "%", "billion", "minutes", "days", "hours", "score", "harmlessness", "sla", "commander", "10.2", "18.4", "72"]):
+                        if re.search(r"(\$|\%|\b\d+(\.\d+)?\b|\b(is|are|defined as|refers to|means|consists of|requires|ensures|designed to)\b)", sent_lower):
                             bonus += 2
 
                         candidate_sentences.append({

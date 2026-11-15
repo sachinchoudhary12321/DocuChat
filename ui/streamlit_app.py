@@ -108,17 +108,17 @@ with st.sidebar:
     st.markdown("---")
 
     # Document Upload Section
-    st.subheader("📤 Upload Documents")
+    st.subheader("📤 Upload Your PDF")
     uploaded_files = st.file_uploader(
-        "Upload PDF reports",
+        "Choose one or more PDF files",
         type=["pdf"],
         accept_multiple_files=True,
-        help="Upload multiple enterprise reports (financial, policy, runbooks)"
+        help="Upload any PDF (technical documentation, reports, papers, manuals)"
     )
 
     if uploaded_files:
-        if st.button("⚡ Index Uploaded PDFs", use_container_width=True):
-            with st.spinner("Extracting text, chunking & creating vector embeddings..."):
+        if st.button("🚀 Process & Index PDF(s)", type="primary", use_container_width=True):
+            with st.spinner("Extracting text, chunking & indexing in vector store..."):
                 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
                 for file in uploaded_files:
                     save_path = UPLOAD_DIR / file.name
@@ -128,7 +128,7 @@ with st.sidebar:
                     try:
                         chunks, stats = process_pdf_document(save_path)
                         vector_store.add_documents(chunks)
-                        st.success(f"✓ **{file.name}** ({stats['total_chunks']} chunks, {stats['total_pages']} pages)")
+                        st.success(f"✓ **{file.name}** indexed ({stats['total_chunks']} chunks, {stats['total_pages']} pages)")
                     except Exception as e:
                         st.error(f"✗ Failed {file.name}: {e}")
             st.rerun()
@@ -184,42 +184,53 @@ with st.sidebar:
     selected_filter = st.selectbox("Filter Search Scope", doc_filter_options)
     active_filter = None if selected_filter == "All Documents" else selected_filter
 
-    if st.button("🔄 Reset to Default Reports", use_container_width=True):
-        vector_store.clear()
-        if SAMPLE_REPORTS_DIR.exists():
-            for sf in SAMPLE_REPORTS_DIR.glob("*.pdf"):
-                c, _ = process_pdf_document(sf)
-                vector_store.add_documents(c)
-        st.rerun()
-
-
 # ============================================================================
 # MAIN INTERFACE: CHAT & CITATIONS
 # ============================================================================
-st.markdown('<div class="header-title">📑 DocuChat: Intelligent Multi-Document RAG</div>', unsafe_allow_html=True)
+st.markdown('<div class="header-title">📑 DocuChat: Multi-Document Q&A</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="header-sub">'
-    'Ask questions across your multi-document collection. Answers are grounded in document context '
-    'with exact page citations and multi-turn conversational memory.'
+    'Upload your own PDFs in the sidebar and ask questions in natural language. '
+    'Answers are strictly grounded in your documents with exact page citations.'
     '</div>',
     unsafe_allow_html=True
 )
 
-# Example Query Chips
-st.markdown("**💡 Quick Test Prompts:**")
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    if st.button("📊 TechCorp Q3 Revenue", use_container_width=True):
-        st.session_state.prompt_input = "What was TechCorp total revenue in Q3 2024 and year-over-year growth?"
-with col2:
-    if st.button("🚨 P1 Incident Response SLA", use_container_width=True):
-        st.session_state.prompt_input = "What is the SLA response time and escalation lead for a P1 critical incident?"
-with col3:
-    if st.button("🛡️ GDPR SAR Request SLA", use_container_width=True):
-        st.session_state.prompt_input = "What is the mandatory resolution window for Subject Access Requests (SAR) under GDPR?"
-with col4:
-    if st.button("🚫 Out-of-Scope Fallback", use_container_width=True):
-        st.session_state.prompt_input = "What is the employee health insurance reimbursement limit for dental surgery?"
+if docs:
+    active_names = ", ".join([d["filename"] for d in docs])
+    st.success(f"📚 **Active Knowledge Base:** {active_names} ({total_chunks} indexed chunks ready)")
+
+    # Dynamic suggestion chips based on the uploaded document
+    st.markdown("**💡 Quick Question Suggestions:**")
+    col1, col2, col3, col4 = st.columns(4)
+    if any("rag" in d["filename"].lower() for d in docs):
+        with col1:
+            if st.button("🧠 Agentic RAG", use_container_width=True):
+                st.session_state.prompt_input = "What is Agentic RAG and how does it work?"
+        with col2:
+            if st.button("🕸️ Graph RAG", use_container_width=True):
+                st.session_state.prompt_input = "What are Graphs and Graph RAG?"
+        with col3:
+            if st.button("🔀 RAG Fusion", use_container_width=True):
+                st.session_state.prompt_input = "What is RAG Fusion?"
+        with col4:
+            if st.button("🎯 Context Precision", use_container_width=True):
+                st.session_state.prompt_input = "What is Context Precision and how is it evaluated?"
+    else:
+        with col1:
+            if st.button("📌 Summarize Topics", use_container_width=True):
+                st.session_state.prompt_input = "Summarize the primary topics covered in this document."
+        with col2:
+            if st.button("🔍 Key Concepts", use_container_width=True):
+                st.session_state.prompt_input = "What are the key concepts and definitions explained here?"
+        with col3:
+            if st.button("📊 Data & Metrics", use_container_width=True):
+                st.session_state.prompt_input = "What are the main numbers, metrics, or statistics provided?"
+        with col4:
+            if st.button("🚫 Out-of-Scope Test", use_container_width=True):
+                st.session_state.prompt_input = "What is the policy on employee dental surgery reimbursement?"
+else:
+    st.info("👈 **No documents indexed yet.** Please upload your PDF in the left sidebar to start asking questions!")
 
 
 # Render Conversation Messages
