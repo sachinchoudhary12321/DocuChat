@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Any
 from pypdf import PdfReader
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from app.config import settings
 
