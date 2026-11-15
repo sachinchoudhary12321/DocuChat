@@ -118,6 +118,7 @@ with st.sidebar:
 
     if uploaded_files:
         if st.button("🚀 Process & Index PDF(s)", type="primary", use_container_width=True):
+            success_count = 0
             with st.spinner("Extracting text, chunking & indexing in vector store..."):
                 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
                 for file in uploaded_files:
@@ -128,10 +129,12 @@ with st.sidebar:
                     try:
                         chunks, stats = process_pdf_document(save_path)
                         vector_store.add_documents(chunks)
-                        st.success(f"✓ **{file.name}** indexed ({stats['total_chunks']} chunks, {stats['total_pages']} pages)")
+                        st.sidebar.success(f"✓ **{file.name}** indexed ({stats['total_chunks']} chunks, {stats['total_pages']} pages)")
+                        success_count += 1
                     except Exception as e:
-                        st.error(f"✗ Failed {file.name}: {e}")
-            st.rerun()
+                        st.sidebar.error(f"✗ **{file.name}**: {e}")
+            if success_count > 0:
+                st.rerun()
 
     st.markdown("---")
     st.subheader("📚 Knowledge Base")
