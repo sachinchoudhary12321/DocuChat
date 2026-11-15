@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     UPLOAD_PATH: Path = UPLOAD_DIR
     VECTOR_STORE_PATH: Path = VECTOR_DIR
     SQLITE_DB_PATH: Path = DB_PATH
-    MAX_UPLOAD_SIZE_MB: int = 25
+    MAX_UPLOAD_SIZE_MB: int = 250
 
     # Conversational Memory
     MAX_HISTORY_TURNS: int = 8

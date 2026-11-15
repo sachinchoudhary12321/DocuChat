@@ -111,18 +111,7 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Auto-index sample reports on first launch if vector store is empty."""
-    if not os.environ.get("TESTING"):
-        indexed = vector_store.get_indexed_documents()
-        if not indexed and SAMPLE_REPORTS_DIR.exists():
-            sample_pdfs = list(SAMPLE_REPORTS_DIR.glob("*.pdf"))
-            for pdf in sample_pdfs:
-                try:
-                    chunks, stats = process_pdf_document(pdf)
-                    vector_store.add_documents(chunks)
-                    logger.info(f"Pre-indexed '{pdf.name}' ({stats['total_chunks']} chunks).")
-                except Exception as e:
-                    logger.error(f"Error pre-indexing {pdf.name}: {e}")
+    """Lifespan context manager for FastAPI."""
     yield
 
 

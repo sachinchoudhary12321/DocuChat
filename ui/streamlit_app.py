@@ -77,16 +77,8 @@ def init_system():
 
 vector_store, memory, graph = init_system()
 
-# Auto-index sample reports on first launch if empty
+# Load currently indexed documents
 indexed_docs = vector_store.get_indexed_documents()
-if not indexed_docs and SAMPLE_REPORTS_DIR.exists():
-    for pdf in SAMPLE_REPORTS_DIR.glob("*.pdf"):
-        try:
-            chunks, stats = process_pdf_document(pdf)
-            vector_store.add_documents(chunks)
-        except Exception:
-            pass
-    indexed_docs = vector_store.get_indexed_documents()
 
 # Session State Management
 if "current_session_id" not in st.session_state:
