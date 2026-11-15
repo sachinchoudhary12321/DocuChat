@@ -1,0 +1,31 @@
+# Core Web & API Frameworks
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+requests>=2.32.0
+python-dotenv>=1.0.1
+
+# Interactive UI
+streamlit>=1.40.0
+
+# Document Processing & Numerical Computations
+pypdf>=5.1.0
+numpy>=1.26.0
+reportlab>=4.2.5
+
+# LangChain & LangGraph Orchestration
+langchain>=0.3.7
+langchain-core>=0.3.15
+langgraph>=0.2.45
+langchain-groq>=0.2.1
+
+# Optional Vector & Embedding Libraries
+# (DocuChat includes a built-in sublinear BM25+TF-IDF dense vector engine for zero-setup execution,
+# and supports sentence-transformers / faiss-cpu out of the box)
+sentence-transformers>=3.0.0
+faiss-cpu>=1.8.0
+
+# Testing & Quality Assurance
+pytest>=8.3.3

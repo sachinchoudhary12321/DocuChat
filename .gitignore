@@ -1,0 +1,44 @@
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment and Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE & OS Files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Dynamic SQLite Runtime Databases
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Uploaded runtime PDFs and temporary vector indexes
+# Sample reports in data/sample_reports/ are tracked
+data/uploads/*
+!data/uploads/.gitkeep
+data/vectorstore/*
+!data/vectorstore/.gitkeep
+
+# Logs
+*.log
+logs/
