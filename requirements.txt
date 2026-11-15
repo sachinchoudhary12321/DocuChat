@@ -21,11 +21,9 @@ langchain-core>=0.3.15
 langgraph>=0.2.45
 langchain-groq>=0.2.1
 
-# Optional Vector & Embedding Libraries
-# (DocuChat includes a built-in sublinear BM25+TF-IDF dense vector engine for zero-setup execution,
-# and supports sentence-transformers / faiss-cpu out of the box)
-sentence-transformers>=3.0.0
-faiss-cpu>=1.8.0
+# Optional Vector & Embedding Libraries (uncomment if local PyTorch embedding is desired)
+# sentence-transformers>=3.0.0
+# faiss-cpu>=1.8.0
 
 # Testing & Quality Assurance
 pytest>=8.3.3
