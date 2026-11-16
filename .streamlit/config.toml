@@ -6,5 +6,5 @@ headless = true
 fileWatcherType = "none"
 
 [client]
-showErrorDetails = false
+showErrorDetails = true
 toolbarMode = "minimal"

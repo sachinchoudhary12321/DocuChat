@@ -14,12 +14,21 @@ Architecture:
 import os
 import sys
 import uuid
+import importlib
 from pathlib import Path
 
 # Add project root to sys.path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+# Ensure updated app submodules are freshly reloaded if running in long-lived container
+for mod_name in ["app.config", "app.vectorstore", "app.memory", "app.graph", "app.ingestion", "app.prompts"]:
+    if mod_name in sys.modules:
+        try:
+            importlib.reload(sys.modules[mod_name])
+        except Exception:
+            pass
 
 import streamlit as st
 from app.config import settings, UPLOAD_DIR
@@ -85,11 +94,12 @@ if "user_session_id" not in st.session_state:
 
 # Ephemeral session-isolated vector store (never written to global disk)
 if "vector_store" not in st.session_state:
-    st.session_state.vector_store = FAISSVectorStoreManager(
-        persist_dir=None,  # 100% in-memory per browser session
-        embeddings=LocalDenseEmbeddings(),
-        session_id=st.session_state.user_session_id
-    )
+    try:
+        vs = FAISSVectorStoreManager(persist_dir=None, embeddings=LocalDenseEmbeddings())
+    except TypeError:
+        vs = FAISSVectorStoreManager(persist_dir=None)
+    vs.session_id = st.session_state.user_session_id
+    st.session_state.vector_store = vs
 
 # Session-isolated memory
 if "memory" not in st.session_state:

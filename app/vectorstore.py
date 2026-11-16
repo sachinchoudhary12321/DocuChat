@@ -98,9 +98,11 @@ class FAISSVectorStoreManager:
         self,
         persist_dir: Optional[Path] = None,
         embeddings: Optional[Embeddings] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        *args: Any,
+        **kwargs: Any
     ):
-        self.session_id = session_id
+        self.session_id = session_id or kwargs.get("session_id")
         self.persist_dir = Path(persist_dir) if persist_dir else None
         if self.persist_dir:
             self.persist_dir.mkdir(parents=True, exist_ok=True)
