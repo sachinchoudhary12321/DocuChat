@@ -136,17 +136,28 @@ class ConversationMemory:
             conn.commit()
             return cursor.rowcount
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
-        """List all active sessions with message counts and timestamps."""
+    def list_sessions(self, prefix: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List active sessions (optionally filtered by prefix) with message counts and timestamps."""
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT session_id,
-                       COUNT(*) as message_count,
-                       MAX(timestamp) as last_active
-                FROM conversation_turns
-                GROUP BY session_id
-                ORDER BY last_active DESC
-            """)
+            if prefix:
+                cursor.execute("""
+                    SELECT session_id,
+                           COUNT(*) as message_count,
+                           MAX(timestamp) as last_active
+                    FROM conversation_turns
+                    WHERE session_id LIKE ?
+                    GROUP BY session_id
+                    ORDER BY last_active DESC
+                """, (f"{prefix}%",))
+            else:
+                cursor.execute("""
+                    SELECT session_id,
+                           COUNT(*) as message_count,
+                           MAX(timestamp) as last_active
+                    FROM conversation_turns
+                    GROUP BY session_id
+                    ORDER BY last_active DESC
+                """)
             rows = cursor.fetchall()
         return [dict(r) for r in rows]

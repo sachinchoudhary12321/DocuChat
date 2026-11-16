@@ -89,22 +89,36 @@ def get_embedding_engine() -> Embeddings:
 
 class FAISSVectorStoreManager:
     """
-    FAISS-compatible vector store manager with file persistence,
-    relevance scoring, and metadata filtering.
+    FAISS-compatible vector store manager with optional disk persistence,
+    relevance scoring, lead chunk retrieval, and metadata filtering.
+    Can run 100% in-memory for session isolation.
     """
 
-    def __init__(self, persist_dir: Optional[Path] = None, embeddings: Optional[Embeddings] = None):
-        self.persist_dir = Path(persist_dir or settings.VECTOR_STORE_PATH)
-        self.persist_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        persist_dir: Optional[Path] = None,
+        embeddings: Optional[Embeddings] = None,
+        session_id: Optional[str] = None
+    ):
+        self.session_id = session_id
+        self.persist_dir = Path(persist_dir) if persist_dir else None
+        if self.persist_dir:
+            self.persist_dir.mkdir(parents=True, exist_ok=True)
         self.embeddings = embeddings or get_embedding_engine()
         self.documents: List[Document] = []
         self.vectors: np.ndarray = np.empty((0, 384), dtype=np.float32)
-        self.load()
+        if self.persist_dir:
+            self.load()
 
     def add_documents(self, new_docs: List[Document]) -> int:
-        """Add document chunks, compute dense embeddings, and persist index to disk."""
+        """Add document chunks, compute dense embeddings, and persist index to disk if configured."""
         if not new_docs:
             return 0
+
+        # Tag chunks with session_id if configured
+        if self.session_id:
+            for doc in new_docs:
+                doc.metadata["session_id"] = self.session_id
 
         texts = [doc.page_content for doc in new_docs]
         embeddings_list = self.embeddings.embed_documents(texts)
@@ -121,8 +135,42 @@ class FAISSVectorStoreManager:
             self.vectors = np.vstack([self.vectors, new_vecs])
 
         self.documents.extend(new_docs)
-        self.save()
+        if self.persist_dir:
+            self.save()
         return len(new_docs)
+
+    def get_lead_chunks(
+        self,
+        doc_filter: Optional[str] = None,
+        max_chunks_per_doc: int = 2
+    ) -> List[Tuple[Document, float]]:
+        """
+        Retrieve the introductory/lead chunks (Page 1) of indexed documents.
+        Essential for overview, topic summary, and document-level queries.
+        """
+        if not self.documents:
+            return []
+
+        doc_chunk_map: Dict[str, List[Document]] = {}
+        for d in self.documents:
+            fname = d.metadata.get("filename", "")
+            doc_id = d.metadata.get("doc_id", "")
+            if doc_filter and doc_filter != fname and doc_filter != doc_id:
+                continue
+
+            key = doc_id or fname
+            if key not in doc_chunk_map:
+                doc_chunk_map[key] = []
+            
+            # Prioritize page 1 chunks, or the first chunks
+            if len(doc_chunk_map[key]) < max_chunks_per_doc:
+                doc_chunk_map[key].append(d)
+
+        lead_results: List[Tuple[Document, float]] = []
+        for chunks in doc_chunk_map.values():
+            for c in chunks:
+                lead_results.append((c, 0.95))
+        return lead_results
 
     def similarity_search_with_score(
         self,
@@ -147,6 +195,9 @@ class FAISSVectorStoreManager:
 
         candidates = []
         for idx, (doc, score) in enumerate(zip(self.documents, scores)):
+            if self.session_id and doc.metadata.get("session_id") and doc.metadata.get("session_id") != self.session_id:
+                continue
+
             if doc_filter:
                 doc_name = doc.metadata.get("filename", "")
                 doc_id = doc.metadata.get("doc_id", "")
@@ -173,7 +224,8 @@ class FAISSVectorStoreManager:
         if removed_count > 0:
             self.documents = [self.documents[i] for i in keep_indices]
             self.vectors = self.vectors[keep_indices] if keep_indices else np.empty((0, 384), dtype=np.float32)
-            self.save()
+            if self.persist_dir:
+                self.save()
 
         return removed_count
 
@@ -181,12 +233,15 @@ class FAISSVectorStoreManager:
         """Wipe all indexed documents and vector files."""
         self.documents = []
         self.vectors = np.empty((0, 384), dtype=np.float32)
-        for f in self.persist_dir.glob("*"):
-            if f.is_file():
-                f.unlink()
+        if self.persist_dir:
+            for f in self.persist_dir.glob("*"):
+                if f.is_file():
+                    f.unlink()
 
     def save(self):
-        """Serialize vectors to .npy and chunk metadata to JSON."""
+        """Serialize vectors to .npy and chunk metadata to JSON if persistence enabled."""
+        if not self.persist_dir:
+            return
         self.persist_dir.mkdir(parents=True, exist_ok=True)
         np.save(str(self.persist_dir / "index.npy"), self.vectors)
         metadata = [
@@ -198,6 +253,8 @@ class FAISSVectorStoreManager:
 
     def load(self):
         """Deserialize vectors and chunk metadata from disk if available."""
+        if not self.persist_dir:
+            return
         index_file = self.persist_dir / "index.npy"
         meta_file = self.persist_dir / "metadata.json"
         if index_file.exists() and meta_file.exists():
@@ -215,6 +272,10 @@ class FAISSVectorStoreManager:
         """Return list of distinct indexed documents with page and chunk metadata."""
         file_map: Dict[str, Dict[str, Any]] = {}
         for d in self.documents:
+            doc_sess = d.metadata.get("session_id")
+            if self.session_id and doc_sess and doc_sess != self.session_id:
+                continue
+
             fname = d.metadata.get("filename", "unknown")
             doc_id = d.metadata.get("doc_id", "unknown")
             key = doc_id or fname

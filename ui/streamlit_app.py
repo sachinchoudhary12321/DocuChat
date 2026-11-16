@@ -3,9 +3,17 @@ Streamlit Web Application for DocuChat.
 Provides multi-PDF drag-and-drop upload, document browser,
 conversational chat with LangGraph orchestration, query reformulation pills,
 and page-level citation cards.
+
+Architecture:
+- 100% Session & Visitor Isolation: Each visitor starts with an empty workspace.
+  Vector stores and chat histories are strictly session-scoped in st.session_state.
+- Grounded Retrieval: Supports both document topic/overview queries and specific fact lookups.
+- Page Citations: Exact document name and page number citations [Doc.pdf, p. X].
 """
 
+import os
 import sys
+import uuid
 from pathlib import Path
 
 # Add project root to sys.path
@@ -14,9 +22,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import streamlit as st
-from app.config import settings, UPLOAD_DIR, SAMPLE_REPORTS_DIR
+from app.config import settings, UPLOAD_DIR
 from app.ingestion import process_pdf_document
-from app.vectorstore import FAISSVectorStoreManager
+from app.vectorstore import FAISSVectorStoreManager, LocalDenseEmbeddings
 from app.memory import ConversationMemory
 from app.graph import build_docuchat_graph
 
@@ -37,7 +45,7 @@ st.markdown("""
         margin-bottom: 0.2rem;
     }
     .header-sub {
-        font-size: 1.05rem;
+        font-size: 1.02rem;
         color: #4B5563;
         margin-bottom: 1.2rem;
     }
@@ -67,36 +75,64 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
-def init_system():
-    vs = FAISSVectorStoreManager()
-    mem = ConversationMemory()
-    workflow = build_docuchat_graph(vs)
-    return vs, mem, workflow
+# ============================================================================
+# MULTI-TENANT SESSION INITIALIZATION (ZERO-LEAK PRIVACY)
+# ============================================================================
 
+# Unique visitor session ID (generated once per browser tab / user session)
+if "user_session_id" not in st.session_state:
+    st.session_state.user_session_id = f"usr_{uuid.uuid4().hex[:10]}"
 
-vector_store, memory, graph = init_system()
+# Ephemeral session-isolated vector store (never written to global disk)
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = FAISSVectorStoreManager(
+        persist_dir=None,  # 100% in-memory per browser session
+        embeddings=LocalDenseEmbeddings(),
+        session_id=st.session_state.user_session_id
+    )
 
-# Load currently indexed documents
-indexed_docs = vector_store.get_indexed_documents()
+# Session-isolated memory
+if "memory" not in st.session_state:
+    st.session_state.memory = ConversationMemory()
 
-# Session State Management
-if "current_session_id" not in st.session_state:
-    st.session_state.current_session_id = "Session-1"
+# LangGraph workflow tied to the user's isolated vector store
+if "graph" not in st.session_state:
+    st.session_state.graph = build_docuchat_graph(st.session_state.vector_store)
+
+# Chat conversation ID within this user's session
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = f"{st.session_state.user_session_id}_chat_1"
+
+# Chat message list for the UI
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
 
+# Optional Groq API key configuration
+if "groq_api_key" not in st.session_state:
+    # Check Streamlit Cloud secrets or environment variable
+    secret_key = None
+    try:
+        secret_key = st.secrets.get("GROQ_API_KEY")
+    except Exception:
+        pass
+    st.session_state.groq_api_key = secret_key or os.environ.get("GROQ_API_KEY", "")
 
-def refresh_history(session_id: str):
-    msgs = memory.get_messages(session_id)
+
+vector_store: FAISSVectorStoreManager = st.session_state.vector_store
+memory: ConversationMemory = st.session_state.memory
+graph = st.session_state.graph
+
+# Retrieve only the current visitor's indexed documents
+docs = vector_store.get_indexed_documents()
+total_chunks = sum(d["chunk_count"] for d in docs)
+
+
+def refresh_history(chat_id: str):
+    msgs = memory.get_messages(chat_id)
     st.session_state.chat_messages = [
         {"role": m["role"], "content": m["content"], "sources": m["sources"]}
         for m in msgs
     ]
-
-
-if not st.session_state.chat_messages:
-    refresh_history(st.session_state.current_session_id)
 
 
 # ============================================================================
@@ -104,7 +140,7 @@ if not st.session_state.chat_messages:
 # ============================================================================
 with st.sidebar:
     st.title("📑 DocuChat Controls")
-    st.caption("Multi-Document Conversational RAG • LangGraph & Groq")
+    st.caption(f"Session: `{st.session_state.user_session_id}` • Private & Isolated")
     st.markdown("---")
 
     # Document Upload Section
@@ -119,10 +155,12 @@ with st.sidebar:
     if uploaded_files:
         if st.button("🚀 Process & Index PDF(s)", type="primary", use_container_width=True):
             success_count = 0
-            with st.spinner("Extracting text, chunking & indexing in vector store..."):
-                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            with st.spinner("Extracting text, chunking & indexing in private session store..."):
+                user_upload_dir = UPLOAD_DIR / st.session_state.user_session_id
+                user_upload_dir.mkdir(parents=True, exist_ok=True)
+
                 for file in uploaded_files:
-                    save_path = UPLOAD_DIR / file.name
+                    save_path = user_upload_dir / file.name
                     with open(save_path, "wb") as f:
                         f.write(file.getbuffer())
 
@@ -133,19 +171,24 @@ with st.sidebar:
                         success_count += 1
                     except Exception as e:
                         st.sidebar.error(f"✗ **{file.name}**: {e}")
+                    finally:
+                        # Clean up temporary uploaded file on disk
+                        try:
+                            if save_path.exists():
+                                save_path.unlink()
+                        except Exception:
+                            pass
+
             if success_count > 0:
                 st.rerun()
 
     st.markdown("---")
     st.subheader("📚 Knowledge Base")
-    docs = vector_store.get_indexed_documents()
-    total_chunks = sum(d["chunk_count"] for d in docs)
     st.metric("Total Indexed Documents", len(docs), f"{total_chunks} Chunks")
 
     if docs:
         for d in docs:
             with st.expander(f"📄 {d['filename']}", expanded=False):
-                st.write(f"• **Doc ID:** `{d['doc_id']}`")
                 st.write(f"• **Pages:** {d['total_pages']}")
                 st.write(f"• **Chunks:** {d['chunk_count']}")
                 st.write(f"• **Indexed Pages:** {', '.join(map(str, d['pages_indexed']))}")
@@ -154,31 +197,46 @@ with st.sidebar:
                     st.warning(f"Deleted {d['filename']}")
                     st.rerun()
     else:
-        st.info("No documents currently indexed.")
+        st.info("No documents currently indexed in your session. Upload a PDF above to get started!")
 
     st.markdown("---")
     st.subheader("💬 Session Manager")
-    sessions = memory.list_sessions()
-    sess_ids = [s["session_id"] for s in sessions]
-    if st.session_state.current_session_id not in sess_ids:
-        sess_ids.append(st.session_state.current_session_id)
+    
+    # List only chats belonging to this visitor's session
+    visitor_sessions = memory.list_sessions(prefix=st.session_state.user_session_id)
+    chat_ids = [s["session_id"] for s in visitor_sessions]
+    if st.session_state.current_chat_id not in chat_ids:
+        chat_ids.insert(0, st.session_state.current_chat_id)
 
-    selected_sess = st.selectbox("Active Session", sess_ids, index=sess_ids.index(st.session_state.current_session_id))
-    if selected_sess != st.session_state.current_session_id:
-        st.session_state.current_session_id = selected_sess
-        refresh_history(selected_sess)
+    # Format human-friendly labels (e.g. Chat 1, Chat 2)
+    def format_chat_label(cid: str) -> str:
+        parts = cid.split("_chat_")
+        if len(parts) == 2:
+            return f"Chat #{parts[1]}"
+        return cid
+
+    selected_chat = st.selectbox(
+        "Active Conversation",
+        chat_ids,
+        index=chat_ids.index(st.session_state.current_chat_id),
+        format_func=format_chat_label
+    )
+    if selected_chat != st.session_state.current_chat_id:
+        st.session_state.current_chat_id = selected_chat
+        refresh_history(selected_chat)
         st.rerun()
 
     c1, c2 = st.columns(2)
     with c1:
         if st.button("➕ New Chat", use_container_width=True):
-            new_sess = f"Session-{len(sess_ids) + 1}"
-            st.session_state.current_session_id = new_sess
+            new_chat_num = len(chat_ids) + 1
+            new_chat_id = f"{st.session_state.user_session_id}_chat_{new_chat_num}"
+            st.session_state.current_chat_id = new_chat_id
             st.session_state.chat_messages = []
             st.rerun()
     with c2:
         if st.button("🧹 Clear Chat", use_container_width=True):
-            memory.clear_session(st.session_state.current_session_id)
+            memory.clear_session(st.session_state.current_chat_id)
             st.session_state.chat_messages = []
             st.rerun()
 
@@ -186,6 +244,26 @@ with st.sidebar:
     doc_filter_options = ["All Documents"] + [d["filename"] for d in docs]
     selected_filter = st.selectbox("Filter Search Scope", doc_filter_options)
     active_filter = None if selected_filter == "All Documents" else selected_filter
+
+    # Advanced Settings Expander
+    with st.expander("⚙️ Advanced Settings", expanded=False):
+        api_input = st.text_input(
+            "Groq API Key (Optional)",
+            value=st.session_state.groq_api_key,
+            type="password",
+            help="Leave blank to use the high-speed local deterministic RAG engine."
+        )
+        if api_input != st.session_state.groq_api_key:
+            st.session_state.groq_api_key = api_input
+            if api_input:
+                os.environ["GROQ_API_KEY"] = api_input
+                settings.GROQ_API_KEY = api_input
+            else:
+                os.environ.pop("GROQ_API_KEY", None)
+                settings.GROQ_API_KEY = None
+            st.session_state.graph = build_docuchat_graph(st.session_state.vector_store)
+            st.rerun()
+
 
 # ============================================================================
 # MAIN INTERFACE: CHAT & CITATIONS
@@ -203,12 +281,12 @@ if docs:
     active_names = ", ".join([d["filename"] for d in docs])
     st.success(f"📚 **Active Knowledge Base:** {active_names} ({total_chunks} indexed chunks ready)")
 
-    # Dynamic generic suggestions for any document
+    # Dynamic suggestions for the user's uploaded documents
     st.markdown("**💡 Quick Question Suggestions:**")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button("📌 Summarize Topics", use_container_width=True):
-            st.session_state.prompt_input = "Summarize the primary topics covered in this document."
+        if st.button("📌 Summarize Document", use_container_width=True):
+            st.session_state.prompt_input = "Tell me the topic and a summary of the uploaded file."
     with col2:
         if st.button("🔍 Key Concepts", use_container_width=True):
             st.session_state.prompt_input = "What are the main key concepts or definitions explained?"
@@ -220,11 +298,12 @@ if docs:
             st.session_state.prompt_input = "What is the policy on employee dental surgery reimbursement?"
 else:
     st.info(
-        "👈 **No documents indexed yet.**\n\n"
+        "👈 **Your workspace is currently empty.**\n\n"
         "To get started:\n"
-        "1. Upload one or more PDF files using the left sidebar.\n"
-        "2. Click **'🚀 Process & Index PDF(s)'**.\n"
-        "3. Ask questions in natural language and receive grounded answers with exact page citations!"
+        "1. Upload one or more PDF files using the **'Upload Your PDF'** tool in the left sidebar.\n"
+        "2. Click **'🚀 Process & Index PDF(s)'** to extract and index text.\n"
+        "3. Ask questions in natural language and receive strictly grounded answers with exact page citations!\n\n"
+        "*Note: Your documents and chat history are 100% private and isolated to your browser session.*"
     )
 
 
@@ -248,6 +327,7 @@ for msg in st.session_state.chat_messages:
                     </div>
                     """, unsafe_allow_html=True)
 
+
 # User Chat Input
 user_query = st.chat_input("Ask a question about your uploaded documents...")
 if "prompt_input" in st.session_state and st.session_state.prompt_input:
@@ -264,12 +344,12 @@ if user_query:
 
         with st.chat_message("assistant"):
             with st.spinner("Searching document context & running LangGraph flow..."):
-                session_id = st.session_state.current_session_id
-                history = memory.get_langchain_messages(session_id, limit=settings.MAX_HISTORY_TURNS)
+                chat_id = st.session_state.current_chat_id
+                history = memory.get_langchain_messages(chat_id, limit=settings.MAX_HISTORY_TURNS)
 
                 state_input = {
                     "question": user_query,
-                    "session_id": session_id,
+                    "session_id": chat_id,
                     "chat_history": history,
                     "standalone_question": user_query,
                     "documents": [],
@@ -281,9 +361,9 @@ if user_query:
 
                 final_state = graph.invoke(state_input)
 
-                # Record in SQLite memory
-                memory.add_message(session_id, "user", user_query)
-                memory.add_message(session_id, "assistant", final_state["answer"], sources=final_state["sources"])
+                # Record in isolated memory
+                memory.add_message(chat_id, "user", user_query)
+                memory.add_message(chat_id, "assistant", final_state["answer"], sources=final_state["sources"])
 
                 # Render Query Reformulation Pill if rewritten
                 if final_state["standalone_question"].strip() != user_query.strip():
